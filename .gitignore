@@ -1,0 +1,6 @@
+# Generated output – not committed
+sales_data.csv
+
+# Python byte-compiled files
+__pycache__/
+*.py[cod]
