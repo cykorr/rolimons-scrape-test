@@ -1,71 +1,46 @@
 """
 chart.py — Generate Plotly OHLC charts from Rolimons sales data.
 
-Reads the CSV produced by main.py (sales_data.csv) and renders:
-  1. A basic OHLC chart (open / high / low / close per day)
-  2. A full chart with 20-day Bollinger Band overlays and a range-selector
-
-Column mapping (mirrors the Plotly Apple finance example):
-  Apple CSV column   →  sales_data.csv column
-  ─────────────────────────────────────────────
-  AAPL.Open          →  Price.Open
-  AAPL.High          →  Price.High
-  AAPL.Low           →  Price.Low
-  AAPL.Close         →  Price.Close
-  AAPL.Volume        →  Price.Volume
-  AAPL.Adjusted      →  Price.Adjusted
-  dn                 →  dn
-  mavg               →  mavg
-  up                 →  up
-  direction          →  direction
+Chart generation functions and the Rolimons data pipeline now live in
+main.py.  This module re-exports those functions for backward compatibility
+and provides its own entry point that fetches live data through main.py's
+pipeline rather than reading a pre-existing CSV.
 
 Usage
 -----
-  # Generate both charts after running main.py:
+  # Fetch live data and generate both charts (same as running main.py):
   python chart.py
 
-  # Use a custom CSV:
-  python chart.py --input my_data.csv
-
-  # Use the Plotly Apple finance demo CSV instead of local data:
+  # Use the Plotly Apple finance demo CSV instead of live data:
   python chart.py --demo
 """
 
 import sys
 import pandas as pd
-import plotly.graph_objects as go
+
+from main import (
+    fetch_html,
+    load_fallback,
+    parse_item_sales,
+    aggregate_by_date,
+    add_indicators,
+    rows_to_dataframe,
+    make_basic_ohlc,
+    make_full_ohlc,
+    ITEM_SALES_URL,
+    FALLBACK_HTML,
+    OUTPUT_BASIC,
+    OUTPUT_FULL,
+)
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Demo data loader (Plotly Apple finance CSV)
 # ---------------------------------------------------------------------------
 
-DEFAULT_CSV   = "sales_data.csv"
-DEMO_CSV_URL  = (
+DEMO_CSV_URL = (
     "https://raw.githubusercontent.com/plotly/datasets/master/"
     "finance-charts-apple.csv"
 )
-
-OUTPUT_BASIC  = "chart_ohlc_basic.html"
-OUTPUT_FULL   = "chart_ohlc_full.html"
-
-# ---------------------------------------------------------------------------
-# Data loading
-# ---------------------------------------------------------------------------
-
-def load_local(path: str) -> pd.DataFrame:
-    """Load the finance-style CSV produced by main.py."""
-    df = pd.read_csv(path)
-    # Normalise column names: rename Price.* → AAPL.* style aliases
-    # so the rest of the code works with either source.
-    df = df.rename(columns={
-        "Price.Open":     "Open",
-        "Price.High":     "High",
-        "Price.Low":      "Low",
-        "Price.Close":    "Close",
-        "Price.Volume":   "Volume",
-        "Price.Adjusted": "Adjusted",
-    })
-    return df
 
 
 def load_demo() -> pd.DataFrame:
@@ -83,131 +58,30 @@ def load_demo() -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Chart 1 – Basic OHLC
-# ---------------------------------------------------------------------------
-
-def make_basic_ohlc(df: pd.DataFrame, title: str = "OHLC Chart") -> go.Figure:
-    """
-    Recreate the introductory Plotly OHLC example:
-      go.Ohlc with Date on x-axis and OHLC prices on y-axis.
-    """
-    fig = go.Figure(
-        data=go.Ohlc(
-            x=df["Date"],
-            open=df["Open"],
-            high=df["High"],
-            low=df["Low"],
-            close=df["Close"],
-        )
-    )
-    fig.update_layout(
-        title=title,
-        xaxis_title="Date",
-        yaxis_title="Price (Robux)",
-        xaxis_rangeslider_visible=False,
-    )
-    return fig
-
-
-# ---------------------------------------------------------------------------
-# Chart 2 – Full OHLC with Bollinger Bands, range selector, direction colour
-# ---------------------------------------------------------------------------
-
-def make_full_ohlc(df: pd.DataFrame, title: str = "OHLC Chart with Bollinger Bands") -> go.Figure:
-    """
-    Advanced chart that mirrors the complete Plotly finance example:
-      • OHLC bars colour-coded by direction (Increasing / Decreasing)
-      • Upper Bollinger Band (up)
-      • 20-day moving average (mavg)
-      • Lower Bollinger Band (dn)
-      • Interactive range selector and range slider
-    """
-    fig = go.Figure()
-
-    # --- OHLC bars ---
-    fig.add_trace(go.Ohlc(
-        name="Price",
-        x=df["Date"],
-        open=df["Open"],
-        high=df["High"],
-        low=df["Low"],
-        close=df["Close"],
-        increasing_line_color="green",
-        decreasing_line_color="red",
-    ))
-
-    # --- Upper Bollinger Band ---
-    fig.add_trace(go.Scatter(
-        name="Upper Band",
-        x=df["Date"],
-        y=df["up"],
-        line={"color": "rgba(0, 0, 200, 0.5)", "width": 1, "dash": "dash"},
-        mode="lines",
-    ))
-
-    # --- 20-day moving average ---
-    fig.add_trace(go.Scatter(
-        name="20-Day MA",
-        x=df["Date"],
-        y=df["mavg"],
-        line={"color": "rgba(200, 100, 0, 0.8)", "width": 1},
-        mode="lines",
-    ))
-
-    # --- Lower Bollinger Band ---
-    fig.add_trace(go.Scatter(
-        name="Lower Band",
-        x=df["Date"],
-        y=df["dn"],
-        line={"color": "rgba(0, 0, 200, 0.5)", "width": 1, "dash": "dash"},
-        fill="tonexty",
-        fillcolor="rgba(0, 0, 200, 0.05)",
-        mode="lines",
-    ))
-
-    # --- Layout with range selector ---
-    fig.update_layout(
-        title=title,
-        xaxis_title="Date",
-        yaxis_title="Price (Robux)",
-        legend={"orientation": "h", "x": 0, "y": 1.1},
-        xaxis=dict(
-            rangeslider={"visible": True},
-            rangeselector=dict(
-                buttons=[
-                    {"count": 7,  "label": "1w", "step": "day",  "stepmode": "backward"},
-                    {"count": 1,  "label": "1m", "step": "month","stepmode": "backward"},
-                    {"count": 3,  "label": "3m", "step": "month","stepmode": "backward"},
-                    {"count": 6,  "label": "6m", "step": "month","stepmode": "backward"},
-                    {"step": "all", "label": "All"},
-                ]
-            ),
-        ),
-    )
-
-    return fig
-
-
-# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    demo_mode  = "--demo"   in sys.argv
-    input_path = DEFAULT_CSV
+    demo_mode = "--demo" in sys.argv
 
-    for i, arg in enumerate(sys.argv[1:], 1):
-        if arg == "--input" and i + 1 < len(sys.argv):
-            input_path = sys.argv[i + 1]
-
-    # Load data
     if demo_mode:
         print("[data] Loading Plotly Apple finance demo CSV …")
         df = load_demo()
         item_label = "Apple (AAPL)"
     else:
-        print(f"[data] Loading local CSV: {input_path}")
-        df = load_local(input_path)
+        # Use main.py's pipeline to fetch and process live data
+        try:
+            html = fetch_html(ITEM_SALES_URL)
+        except Exception as exc:
+            print(f"[fetch] Network error ({exc}) – falling back to {FALLBACK_HTML}")
+            html = load_fallback()
+
+        item_sales = parse_item_sales(html)
+        print(f"[parse] Found {item_sales.get('num_points', '?')} historical sale data points")
+
+        rows = aggregate_by_date(item_sales)
+        rows = add_indicators(rows)
+        df = rows_to_dataframe(rows)
         item_label = "Rolimons Item Sales"
 
     print(f"[data] {len(df)} rows loaded  ({df['Date'].iloc[0]} → {df['Date'].iloc[-1]})")
@@ -225,3 +99,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
