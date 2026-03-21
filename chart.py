@@ -8,7 +8,7 @@ pipeline rather than reading a pre-existing CSV.
 
 Usage
 -----
-  # Fetch live data and generate both charts (same as running main.py):
+  # Fetch live data and generate all charts (same as running main.py):
   python chart.py
 
   # Use the Plotly Apple finance demo CSV instead of live data:
@@ -26,10 +26,12 @@ from main import (
     add_indicators,
     rows_to_dataframe,
     make_basic_ohlc,
+    make_candlestick,
     make_full_ohlc,
     ITEM_SALES_URL,
     FALLBACK_HTML,
     OUTPUT_BASIC,
+    OUTPUT_CANDLESTICK,
     OUTPUT_FULL,
 )
 
@@ -89,12 +91,17 @@ def main() -> None:
     # Chart 1 – basic OHLC
     fig_basic = make_basic_ohlc(df, title=f"{item_label} — OHLC Chart")
     fig_basic.write_html(OUTPUT_BASIC)
-    print(f"[chart] Basic OHLC chart saved → {OUTPUT_BASIC}")
+    print(f"[chart] Basic OHLC chart saved        → {OUTPUT_BASIC}")
 
-    # Chart 2 – full OHLC with Bollinger Bands
+    # Chart 2 – basic Candlestick
+    fig_cs = make_candlestick(df, title=f"{item_label} — Candlestick Chart")
+    fig_cs.write_html(OUTPUT_CANDLESTICK)
+    print(f"[chart] Basic Candlestick chart saved  → {OUTPUT_CANDLESTICK}")
+
+    # Chart 3 – full OHLC with Bollinger Bands and interactive menus
     fig_full = make_full_ohlc(df, title=f"{item_label} — OHLC + Bollinger Bands")
     fig_full.write_html(OUTPUT_FULL)
-    print(f"[chart] Full OHLC chart saved  → {OUTPUT_FULL}")
+    print(f"[chart] Full OHLC chart saved          → {OUTPUT_FULL}")
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 sales_data.csv
 chart_ohlc_basic.html
 chart_ohlc_full.html
+chart_candlestick_basic.html
 
 # Python byte-compiled files
 __pycache__/

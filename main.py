@@ -28,6 +28,12 @@ Usage
   python main.py                   # fetches live, outputs sales_data.csv + charts
   python main.py --output out.csv  # custom CSV output path
   python main.py --no-charts       # skip chart generation
+
+Chart outputs
+-------------
+  chart_ohlc_basic.html       – basic OHLC chart
+  chart_ohlc_full.html        – OHLC + Bollinger Bands with data and chart-type menus
+  chart_candlestick_basic.html– basic Candlestick chart
 """
 
 import csv
@@ -50,8 +56,9 @@ from bs4 import BeautifulSoup
 ITEM_SALES_URL = "https://www.rolimons.com/itemsales/16477149823"
 FALLBACK_HTML  = "korroutput.html"
 OUTPUT_CSV     = "sales_data.csv"
-OUTPUT_BASIC   = "chart_ohlc_basic.html"
-OUTPUT_FULL    = "chart_ohlc_full.html"
+OUTPUT_BASIC        = "chart_ohlc_basic.html"
+OUTPUT_FULL         = "chart_ohlc_full.html"
+OUTPUT_CANDLESTICK  = "chart_candlestick_basic.html"
 
 _HEADERS = {
     "User-Agent": (
@@ -276,23 +283,60 @@ def make_basic_ohlc(df: pd.DataFrame, title: str = "OHLC Chart") -> go.Figure:
 
 
 # ---------------------------------------------------------------------------
-# Step 8 – Chart 2: Full OHLC with Bollinger Bands, range selector
+# Step 8 – Chart 2: Basic Candlestick
+# ---------------------------------------------------------------------------
+
+def make_candlestick(df: pd.DataFrame, title: str = "Candlestick Chart") -> go.Figure:
+    """
+    Basic Candlestick chart using go.Candlestick with Date on the x-axis
+    and OHLC sale prices on the y-axis.
+    """
+    fig = go.Figure(
+        data=go.Candlestick(
+            x=df["Date"],
+            open=df["Open"],
+            high=df["High"],
+            low=df["Low"],
+            close=df["Close"],
+        )
+    )
+    fig.update_layout(
+        title=title,
+        xaxis_title="Date",
+        yaxis_title="Price (Robux)",
+        xaxis_rangeslider_visible=False,
+    )
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Step 9 – Chart 3: Full OHLC with Bollinger Bands, range selector,
+#           chart-type menu, and data menu
 # ---------------------------------------------------------------------------
 
 def make_full_ohlc(df: pd.DataFrame, title: str = "OHLC Chart with Bollinger Bands") -> go.Figure:
     """
-    Advanced chart that mirrors the complete Plotly finance example:
-      • OHLC bars colour-coded by direction (Increasing / Decreasing)
-      • Upper Bollinger Band (up)
-      • 20-day moving average (mavg)
-      • Lower Bollinger Band (dn)
+    Advanced interactive chart with:
+      • OHLC bars or Candlestick (switchable via "Chart Type" dropdown)
+      • Upper / lower Bollinger Bands and 20-day moving average
+      • RAP (Adjusted) line and Volume bar series (switchable via "Data" dropdown)
       • Interactive range selector and range slider
+
+    Trace index map
+    ---------------
+      0  OHLC bars          (price, visible by default)
+      1  Candlestick        (price, hidden by default)
+      2  Upper Bollinger    (price overlay, visible by default)
+      3  20-Day MA          (price overlay, visible by default)
+      4  Lower Bollinger    (price overlay, visible by default)
+      5  RAP line           (hidden by default)
+      6  Volume bar         (hidden by default)
     """
     fig = go.Figure()
 
-    # --- OHLC bars ---
+    # --- Trace 0: OHLC bars (default price view) ---
     fig.add_trace(go.Ohlc(
-        name="Price",
+        name="Price (OHLC)",
         x=df["Date"],
         open=df["Open"],
         high=df["High"],
@@ -300,27 +344,43 @@ def make_full_ohlc(df: pd.DataFrame, title: str = "OHLC Chart with Bollinger Ban
         close=df["Close"],
         increasing_line_color="green",
         decreasing_line_color="red",
+        visible=True,
     ))
 
-    # --- Upper Bollinger Band ---
+    # --- Trace 1: Candlestick (hidden; shown via Chart Type menu) ---
+    fig.add_trace(go.Candlestick(
+        name="Price (Candlestick)",
+        x=df["Date"],
+        open=df["Open"],
+        high=df["High"],
+        low=df["Low"],
+        close=df["Close"],
+        increasing_line_color="green",
+        decreasing_line_color="red",
+        visible=False,
+    ))
+
+    # --- Trace 2: Upper Bollinger Band ---
     fig.add_trace(go.Scatter(
         name="Upper Band",
         x=df["Date"],
         y=df["up"],
         line={"color": "rgba(0, 0, 200, 0.5)", "width": 1, "dash": "dash"},
         mode="lines",
+        visible=True,
     ))
 
-    # --- 20-day moving average ---
+    # --- Trace 3: 20-day moving average ---
     fig.add_trace(go.Scatter(
         name="20-Day MA",
         x=df["Date"],
         y=df["mavg"],
         line={"color": "rgba(200, 100, 0, 0.8)", "width": 1},
         mode="lines",
+        visible=True,
     ))
 
-    # --- Lower Bollinger Band ---
+    # --- Trace 4: Lower Bollinger Band ---
     fig.add_trace(go.Scatter(
         name="Lower Band",
         x=df["Date"],
@@ -329,14 +389,49 @@ def make_full_ohlc(df: pd.DataFrame, title: str = "OHLC Chart with Bollinger Ban
         fill="tonexty",
         fillcolor="rgba(0, 0, 200, 0.05)",
         mode="lines",
+        visible=True,
     ))
 
-    # --- Layout with range selector ---
+    # --- Trace 5: RAP / Adjusted price line (hidden by default) ---
+    fig.add_trace(go.Scatter(
+        name="RAP",
+        x=df["Date"],
+        y=df["Adjusted"],
+        line={"color": "rgba(150, 0, 200, 0.8)", "width": 2},
+        mode="lines",
+        visible=False,
+    ))
+
+    # --- Trace 6: Volume bar chart (hidden by default) ---
+    fig.add_trace(go.Bar(
+        name="Volume",
+        x=df["Date"],
+        y=df["Volume"],
+        marker_color="rgba(0, 150, 100, 0.6)",
+        visible=False,
+    ))
+
+    # Visibility patterns used by the menus
+    _price_ohlc  = [True,  False, True,  True,  True,  False, False]
+    _price_cs    = [False, True,  True,  True,  True,  False, False]
+    _rap         = [False, False, False, False, False, True,  False]
+    _volume      = [False, False, False, False, False, False, True]
+
+    # Layout constants for menu/legend positioning
+    _legend_y    = 1.02   # horizontal legend just above the plot area
+    _top_margin  = 120    # extra top margin (px) to fit menus + title
+    _menu_y      = 1.15   # y-position of the dropdown menus (paper coords)
+    _menu_x_type = 0.0    # x-position of the Chart Type menu
+    _menu_x_data = 0.22   # x-position of the Data menu (offset right)
+    _annot_y     = 1.22   # y-position of the menu label annotations
+
+    # --- Layout with range selector and two dropdown menus ---
     fig.update_layout(
         title=title,
         xaxis_title="Date",
         yaxis_title="Price (Robux)",
-        legend={"orientation": "h", "x": 0, "y": 1.1},
+        legend={"orientation": "h", "x": 0, "y": _legend_y},
+        margin={"t": _top_margin},
         xaxis=dict(
             rangeslider={"visible": True},
             rangeselector=dict(
@@ -349,6 +444,94 @@ def make_full_ohlc(df: pd.DataFrame, title: str = "OHLC Chart with Bollinger Ban
                 ]
             ),
         ),
+        updatemenus=[
+            # ── Menu 1: Chart Type (OHLC vs Candlestick) ──────────────────
+            dict(
+                type="dropdown",
+                direction="down",
+                showactive=True,
+                x=_menu_x_type,
+                xanchor="left",
+                y=_menu_y,
+                yanchor="top",
+                pad={"r": 10, "t": 5},
+                buttons=[
+                    dict(
+                        label="OHLC",
+                        method="update",
+                        args=[
+                            {"visible": _price_ohlc},
+                            {"yaxis.title.text": "Price (Robux)"},
+                        ],
+                    ),
+                    dict(
+                        label="Candlestick",
+                        method="update",
+                        args=[
+                            {"visible": _price_cs},
+                            {"yaxis.title.text": "Price (Robux)"},
+                        ],
+                    ),
+                ],
+            ),
+            # ── Menu 2: Data series ────────────────────────────────────────
+            dict(
+                type="dropdown",
+                direction="down",
+                showactive=True,
+                x=_menu_x_data,
+                xanchor="left",
+                y=_menu_y,
+                yanchor="top",
+                pad={"r": 10, "t": 5},
+                buttons=[
+                    dict(
+                        label="Sale Price",
+                        method="update",
+                        args=[
+                            {"visible": _price_ohlc},
+                            {"yaxis.title.text": "Price (Robux)"},
+                        ],
+                    ),
+                    dict(
+                        label="RAP",
+                        method="update",
+                        args=[
+                            {"visible": _rap},
+                            {"yaxis.title.text": "RAP (Robux)"},
+                        ],
+                    ),
+                    dict(
+                        label="Volume",
+                        method="update",
+                        args=[
+                            {"visible": _volume},
+                            {"yaxis.title.text": "Volume (Sales)"},
+                        ],
+                    ),
+                ],
+            ),
+        ],
+        annotations=[
+            dict(
+                text="Chart Type:",
+                showarrow=False,
+                x=_menu_x_type,
+                xref="paper",
+                y=_annot_y,
+                yref="paper",
+                align="left",
+            ),
+            dict(
+                text="Data:",
+                showarrow=False,
+                x=_menu_x_data,
+                xref="paper",
+                y=_annot_y,
+                yref="paper",
+                align="left",
+            ),
+        ],
     )
 
     return fig
@@ -408,11 +591,15 @@ def main() -> None:
 
         fig_basic = make_basic_ohlc(df, title=f"{item_label} — OHLC Chart")
         fig_basic.write_html(OUTPUT_BASIC)
-        print(f"\n[chart] Basic OHLC chart saved → {OUTPUT_BASIC}")
+        print(f"\n[chart] Basic OHLC chart saved        → {OUTPUT_BASIC}")
+
+        fig_cs = make_candlestick(df, title=f"{item_label} — Candlestick Chart")
+        fig_cs.write_html(OUTPUT_CANDLESTICK)
+        print(f"[chart] Basic Candlestick chart saved  → {OUTPUT_CANDLESTICK}")
 
         fig_full = make_full_ohlc(df, title=f"{item_label} — OHLC + Bollinger Bands")
         fig_full.write_html(OUTPUT_FULL)
-        print(f"[chart] Full OHLC chart saved  → {OUTPUT_FULL}")
+        print(f"[chart] Full OHLC chart saved          → {OUTPUT_FULL}")
 
 
 if __name__ == "__main__":
