@@ -1,5 +1,7 @@
 # Generated output – not committed
 sales_data.csv
+chart_ohlc_basic.html
+chart_ohlc_full.html
 
 # Python byte-compiled files
 __pycache__/
