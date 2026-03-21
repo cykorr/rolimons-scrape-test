@@ -1,5 +1,9 @@
 """
-main.py — Fetch and sort Rolimons item-sales data into a finance-style CSV.
+main.py — Fetch, process, and chart Rolimons item-sales data.
+
+Fetches data from the Rolimons item-sales page, aggregates it into a
+finance-style OHLCV CSV, computes 20-day Bollinger Band indicators, and
+renders interactive Plotly OHLC charts — all in a single run.
 
 Output format mirrors the Plotly Apple finance CSV:
   Date, Price.Open, Price.High, Price.Low, Price.Close, Price.Volume,
@@ -21,8 +25,9 @@ Column mapping from Rolimons data
 
 Usage
 -----
-  python main.py                   # fetches live, outputs sales_data.csv
-  python main.py --output out.csv  # custom output path
+  python main.py                   # fetches live, outputs sales_data.csv + charts
+  python main.py --output out.csv  # custom CSV output path
+  python main.py --no-charts       # skip chart generation
 """
 
 import csv
@@ -33,6 +38,8 @@ import statistics
 from collections import defaultdict
 from datetime import datetime, timezone
 
+import pandas as pd
+import plotly.graph_objects as go
 import requests
 from bs4 import BeautifulSoup
 
@@ -43,6 +50,8 @@ from bs4 import BeautifulSoup
 ITEM_SALES_URL = "https://www.rolimons.com/itemsales/16477149823"
 FALLBACK_HTML  = "korroutput.html"
 OUTPUT_CSV     = "sales_data.csv"
+OUTPUT_BASIC   = "chart_ohlc_basic.html"
+OUTPUT_FULL    = "chart_ohlc_full.html"
 
 _HEADERS = {
     "User-Agent": (
@@ -71,7 +80,7 @@ def fetch_html(url: str) -> str:
 
     print(f"[fetch] HTTP {request.status_code} – falling back to {FALLBACK_HTML}")
     try:
-        return _load_fallback()
+        return load_fallback()
     except FileNotFoundError:
         raise RuntimeError(
             f"HTTP {request.status_code} from server and fallback file "
@@ -79,7 +88,7 @@ def fetch_html(url: str) -> str:
         )
 
 
-def _load_fallback() -> str:
+def load_fallback() -> str:
     """
     Load the saved Qt-Rich-Text HTML snapshot (korroutput.html).
     The inner Rolimons page is stored as plain text inside <p> elements.
@@ -219,20 +228,151 @@ def write_csv(rows: list[dict], path: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Step 6 – Convert rows to a DataFrame for charting
+# ---------------------------------------------------------------------------
+
+def rows_to_dataframe(rows: list[dict]) -> pd.DataFrame:
+    """
+    Convert the processed list of row dicts to a pandas DataFrame,
+    renaming Price.* columns to the short aliases used by the chart functions.
+    """
+    df = pd.DataFrame(rows)
+    df = df.rename(columns={
+        "Price.Open":     "Open",
+        "Price.High":     "High",
+        "Price.Low":      "Low",
+        "Price.Close":    "Close",
+        "Price.Volume":   "Volume",
+        "Price.Adjusted": "Adjusted",
+    })
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Step 7 – Chart 1: Basic OHLC
+# ---------------------------------------------------------------------------
+
+def make_basic_ohlc(df: pd.DataFrame, title: str = "OHLC Chart") -> go.Figure:
+    """
+    Recreate the introductory Plotly OHLC example:
+      go.Ohlc with Date on x-axis and OHLC prices on y-axis.
+    """
+    fig = go.Figure(
+        data=go.Ohlc(
+            x=df["Date"],
+            open=df["Open"],
+            high=df["High"],
+            low=df["Low"],
+            close=df["Close"],
+        )
+    )
+    fig.update_layout(
+        title=title,
+        xaxis_title="Date",
+        yaxis_title="Price (Robux)",
+        xaxis_rangeslider_visible=False,
+    )
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Step 8 – Chart 2: Full OHLC with Bollinger Bands, range selector
+# ---------------------------------------------------------------------------
+
+def make_full_ohlc(df: pd.DataFrame, title: str = "OHLC Chart with Bollinger Bands") -> go.Figure:
+    """
+    Advanced chart that mirrors the complete Plotly finance example:
+      • OHLC bars colour-coded by direction (Increasing / Decreasing)
+      • Upper Bollinger Band (up)
+      • 20-day moving average (mavg)
+      • Lower Bollinger Band (dn)
+      • Interactive range selector and range slider
+    """
+    fig = go.Figure()
+
+    # --- OHLC bars ---
+    fig.add_trace(go.Ohlc(
+        name="Price",
+        x=df["Date"],
+        open=df["Open"],
+        high=df["High"],
+        low=df["Low"],
+        close=df["Close"],
+        increasing_line_color="green",
+        decreasing_line_color="red",
+    ))
+
+    # --- Upper Bollinger Band ---
+    fig.add_trace(go.Scatter(
+        name="Upper Band",
+        x=df["Date"],
+        y=df["up"],
+        line={"color": "rgba(0, 0, 200, 0.5)", "width": 1, "dash": "dash"},
+        mode="lines",
+    ))
+
+    # --- 20-day moving average ---
+    fig.add_trace(go.Scatter(
+        name="20-Day MA",
+        x=df["Date"],
+        y=df["mavg"],
+        line={"color": "rgba(200, 100, 0, 0.8)", "width": 1},
+        mode="lines",
+    ))
+
+    # --- Lower Bollinger Band ---
+    fig.add_trace(go.Scatter(
+        name="Lower Band",
+        x=df["Date"],
+        y=df["dn"],
+        line={"color": "rgba(0, 0, 200, 0.5)", "width": 1, "dash": "dash"},
+        fill="tonexty",
+        fillcolor="rgba(0, 0, 200, 0.05)",
+        mode="lines",
+    ))
+
+    # --- Layout with range selector ---
+    fig.update_layout(
+        title=title,
+        xaxis_title="Date",
+        yaxis_title="Price (Robux)",
+        legend={"orientation": "h", "x": 0, "y": 1.1},
+        xaxis=dict(
+            rangeslider={"visible": True},
+            rangeselector=dict(
+                buttons=[
+                    {"count": 7,  "label": "1w", "step": "day",   "stepmode": "backward"},
+                    {"count": 1,  "label": "1m", "step": "month", "stepmode": "backward"},
+                    {"count": 3,  "label": "3m", "step": "month", "stepmode": "backward"},
+                    {"count": 6,  "label": "6m", "step": "month", "stepmode": "backward"},
+                    {"step": "all", "label": "All"},
+                ]
+            ),
+        ),
+    )
+
+    return fig
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 def main() -> None:
     output_path = OUTPUT_CSV
-    if len(sys.argv) == 3 and sys.argv[1] == "--output":
-        output_path = sys.argv[2]
+    generate_charts = "--no-charts" not in sys.argv
+
+    args = sys.argv[1:]
+    for i, arg in enumerate(args):
+        if arg == "--output" and i + 1 < len(args):
+            output_path = args[i + 1]
 
     # 1. Fetch HTML (live or fallback)
     try:
         html = fetch_html(ITEM_SALES_URL)
     except Exception as exc:
         print(f"[fetch] Network error ({exc}) – falling back to {FALLBACK_HTML}")
-        html = _load_fallback()
+        html = load_fallback()
 
     # 2. Parse the embedded item_sales JS object
     item_sales = parse_item_sales(html)
@@ -260,6 +400,19 @@ def main() -> None:
     print(header)
     for row in rows[-5:]:
         print(",".join(str(row[f]) for f in _CSV_FIELDS))
+
+    # 6. Generate charts directly from in-memory data
+    if generate_charts:
+        df = rows_to_dataframe(rows)
+        item_label = "Rolimons Item Sales"
+
+        fig_basic = make_basic_ohlc(df, title=f"{item_label} — OHLC Chart")
+        fig_basic.write_html(OUTPUT_BASIC)
+        print(f"\n[chart] Basic OHLC chart saved → {OUTPUT_BASIC}")
+
+        fig_full = make_full_ohlc(df, title=f"{item_label} — OHLC + Bollinger Bands")
+        fig_full.write_html(OUTPUT_FULL)
+        print(f"[chart] Full OHLC chart saved  → {OUTPUT_FULL}")
 
 
 if __name__ == "__main__":
